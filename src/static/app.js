@@ -17,6 +17,7 @@ document.addEventListener("DOMContentLoaded", () => {
       Object.entries(activities).forEach(([name, details]) => {
         const activityCard = document.createElement("div");
         activityCard.className = "activity-card";
+        activityCard.dataset.activity = name;
 
         const spotsLeft = details.max_participants - details.participants.length;
 
@@ -24,7 +25,7 @@ document.addEventListener("DOMContentLoaded", () => {
           <h4>${name}</h4>
           <p>${details.description}</p>
           <p><strong>Schedule:</strong> ${details.schedule}</p>
-          <p><strong>Availability:</strong> ${spotsLeft} spots left</p>
+          <p class="availability"><strong>Availability:</strong> ${spotsLeft} spots left</p>
         `;
 
         // Participants section
@@ -40,7 +41,24 @@ document.addEventListener("DOMContentLoaded", () => {
           ul.className = "participants-list";
           details.participants.forEach((p) => {
             const li = document.createElement("li");
-            li.textContent = p;
+            li.className = "participant-item";
+            const span = document.createElement("span");
+            span.className = "participant-email";
+            span.textContent = p;
+
+            const btn = document.createElement("button");
+            btn.className = "participant-delete";
+            btn.dataset.email = p;
+            btn.type = "button";
+            btn.title = `Unregister ${p}`;
+            btn.textContent = "✖";
+            btn.addEventListener("click", async (e) => {
+              e.preventDefault();
+              await handleUnregister(name, p, li, activityCard);
+            });
+
+            li.appendChild(span);
+            li.appendChild(btn);
             ul.appendChild(li);
           });
           participantsSection.appendChild(ul);
@@ -66,6 +84,107 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
+  // Helper to find activity card element by activity name
+  function findActivityCard(activityName) {
+    const cards = document.querySelectorAll(".activity-card");
+    return Array.from(cards).find((c) => c.dataset.activity === activityName);
+  }
+
+  // Update activity card UI after participants change
+  function updateActivityCardUI(activityName, participants, maxParticipants) {
+    const card = findActivityCard(activityName);
+    if (!card) return;
+
+    // Update participants header / list
+    const participantsSection = card.querySelector(".participants");
+    let ul = participantsSection.querySelector("ul.participants-list");
+    const header = participantsSection.querySelector("h5");
+
+    if (!participants || participants.length === 0) {
+      if (ul) ul.remove();
+      let none = participantsSection.querySelector(".none");
+      if (!none) {
+        none = document.createElement("div");
+        none.className = "none";
+        participantsSection.appendChild(none);
+      }
+      none.textContent = "No participants yet.";
+      header.textContent = `Participants (0)`;
+    } else {
+      // Ensure no "none" message
+      const none = participantsSection.querySelector(".none");
+      if (none) none.remove();
+
+      if (!ul) {
+        ul = document.createElement("ul");
+        ul.className = "participants-list";
+        participantsSection.appendChild(ul);
+      }
+
+      // Rebuild list
+      ul.innerHTML = "";
+      participants.forEach((p) => {
+        const li = document.createElement("li");
+        li.className = "participant-item";
+        const span = document.createElement("span");
+        span.className = "participant-email";
+        span.textContent = p;
+
+        const btn = document.createElement("button");
+        btn.className = "participant-delete";
+        btn.dataset.email = p;
+        btn.type = "button";
+        btn.title = `Unregister ${p}`;
+        btn.textContent = "✖";
+        btn.addEventListener("click", async (e) => {
+          e.preventDefault();
+          await handleUnregister(activityName, p, li, card);
+        });
+
+        li.appendChild(span);
+        li.appendChild(btn);
+        ul.appendChild(li);
+      });
+
+      header.textContent = `Participants (${participants.length})`;
+    }
+
+    // Update availability
+    const availability = card.querySelector(".availability");
+    if (availability) {
+      const spotsLeft = maxParticipants - (participants ? participants.length : 0);
+      availability.innerHTML = `<strong>Availability:</strong> ${spotsLeft} spots left`;
+    }
+  }
+
+  // Handle unregister click
+  async function handleUnregister(activityName, email, liElement, cardElement) {
+    try {
+      const resp = await fetch(
+        `/activities/${encodeURIComponent(activityName)}/signup?email=${encodeURIComponent(email)}`,
+        { method: "DELETE" }
+      );
+
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        alert(err.detail || err.message || "Failed to unregister participant");
+        return;
+      }
+
+      const data = await resp.json();
+
+      // Remove the list item from DOM or rebuild UI
+      if (liElement && liElement.parentElement) {
+        liElement.remove();
+      }
+
+      updateActivityCardUI(activityName, data.participants, data.max_participants);
+    } catch (error) {
+      console.error("Error unregistering:", error);
+      alert("Failed to unregister participant. Please try again.");
+    }
+  }
+
   // Handle form submission
   signupForm.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -87,6 +206,10 @@ document.addEventListener("DOMContentLoaded", () => {
         messageDiv.textContent = result.message;
         messageDiv.className = "success";
         signupForm.reset();
+        // Update the UI for the activity without full page refresh
+        if (result.participants) {
+          updateActivityCardUI(activity, result.participants, result.max_participants);
+        }
       } else {
         messageDiv.textContent = result.detail || "An error occurred";
         messageDiv.className = "error";
